@@ -308,26 +308,26 @@
             pendingHaptic = type;
         };
 
-        const playAudioClick = (freq = 800) => {
+        const playAudioClick = (freq = 150) => {
             if (!audioCtx) return;
             const osc = audioCtx.createOscillator();
             const gain = audioCtx.createGain();
-            osc.type = 'square'; // Sharper, more metallic harmonics
+            osc.type = 'sine';
             osc.frequency.setValueAtTime(freq, audioCtx.currentTime);
-            gain.gain.setValueAtTime(0.08, audioCtx.currentTime); // Lower volume for sharper wave
-            gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.03);
+            gain.gain.setValueAtTime(0.3, audioCtx.currentTime);
+            gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.05);
             osc.connect(gain);
             gain.connect(audioCtx.destination);
             osc.start();
-            osc.stop(audioCtx.currentTime + 0.03);
+            osc.stop(audioCtx.currentTime + 0.05);
         };
 
         const performVibration = (type) => {
             if (isIOS && hapticInput) {
-                // Sharper audio click for "찰칵" feel
-                if (type === 'TICK') playAudioClick(900);
-                else if (type === 'SNAP') playAudioClick(1200);
-                else if (type === 'SUCCESS') playAudioClick(400);
+                // Pre-sharpening audio click (sine based)
+                if (type === 'TICK') playAudioClick(150);
+                else if (type === 'SNAP') playAudioClick(250);
+                else if (type === 'SUCCESS') playAudioClick(100);
 
                 // Physical trigger
                 hapticInput.click();
@@ -356,6 +356,8 @@
         };
 
         const init = async () => {
+            if (isInitialized) return; // Prevent duplicate init
+
             // Audio Context must start on gesture
             audioCtx = new (window.AudioContext || window.webkitAudioContext)();
             if (audioCtx.state === 'suspended') audioCtx.resume();
@@ -371,9 +373,11 @@
                         startTracking();
                     } else {
                         alert('센서 권한이 필요합니다.');
+                        return;
                     }
                 } catch (e) {
                     console.error(e);
+                    return;
                 }
             } else {
                 startTracking();
@@ -469,17 +473,25 @@
         };
 
         const reset = () => {
-            if (!isUnlocked) return;
+            const previouslyUnlocked = isUnlocked;
+            // Allow manual reset even if not unlocked
             isUnlocked = false;
             sweetSpot = Math.floor(Math.random() * 360);
+            lastTickAngle = 0;
+            lastResolutionAngle = 0;
+            isInSweetSpot = false;
+
             document.body.classList.remove('unlocked');
             statusText.textContent = 'LOCKED';
             statusText.style.color = '#aaa';
             successMsg.classList.remove('show');
 
-            // Restart the logic loop
-            requestAnimationFrame(updateLoop);
+            // Restart the logic loop only if it was stopped
+            if (previouslyUnlocked) {
+                requestAnimationFrame(updateLoop);
+            }
 
+            // Feedback
             triggerHaptic('SNAP');
         };
 
