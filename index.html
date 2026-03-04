@@ -125,7 +125,7 @@
             align-items: center;
             justify-content: center;
             box-shadow: inset 0 2px 5px rgba(255, 255, 255, 0.1), 0 5px 15px rgba(0, 0, 0, 0.5);
-            transition: transform 0.1s linear;
+            /* Removed transition to prevent wild spinning at 360/0 boundary */
         }
 
         .keyhole {
@@ -267,7 +267,7 @@
     <div class="hint">TAP SCREEN TO UNLOCK WHEN NEAR</div>
 
     <!-- Hidden haptic trigger for iOS 17.4+ -->
-    <div style="position: absolute; opacity: 0; pointer-events: none; visibility: hidden;">
+    <div style="position: fixed; top: -100px; left: -100px; opacity: 0.01; pointer-events: none;">
         <input type="checkbox" id="haptic-trigger" switch>
         <label for="haptic-trigger" id="haptic-label"></label>
     </div>
