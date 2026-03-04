@@ -125,7 +125,9 @@
             align-items: center;
             justify-content: center;
             box-shadow: inset 0 2px 5px rgba(255, 255, 255, 0.1), 0 5px 15px rgba(0, 0, 0, 0.5);
-            /* Removed transition to prevent wild spinning at 360/0 boundary */
+            /* GPU Acceleration */
+            will-change: transform;
+            transform: translateZ(0);
         }
 
         .keyhole {
@@ -267,7 +269,8 @@
     <div class="hint">TAP SCREEN TO UNLOCK WHEN NEAR</div>
 
     <!-- Hidden haptic trigger for iOS 17.4+ -->
-    <div style="position: fixed; top: -100px; left: -100px; opacity: 0.01; pointer-events: none;">
+    <div
+        style="position: fixed; top: 0; left: 0; width: 1px; height: 1px; opacity: 0.01; overflow: hidden; pointer-events: none; z-index: -1;">
         <input type="checkbox" id="haptic-trigger" switch>
         <label for="haptic-trigger" id="haptic-label"></label>
     </div>
@@ -289,24 +292,33 @@
         let currentAngle = 0;
         let lastVibrationTime = 0;
 
-        // Vibrate helper with iOS fallback
+        // Vibrate helper with iOS fallback and concurrency lock
         const hapticTrigger = document.getElementById('haptic-label');
+        const hapticInput = document.getElementById('haptic-trigger');
         const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+        let isVibrating = false;
 
         const vibrate = async (pattern) => {
-            if (isIOS && hapticTrigger) {
-                // iOS Haptic Workaround (Checkbox Switch Hack)
-                const patterns = Array.isArray(pattern) ? pattern : [pattern];
-                for (let i = 0; i < patterns.length; i++) {
-                    if (i % 2 === 0) { // Only trigger on "on" parts of the pattern
-                        hapticTrigger.click();
+            if (isVibrating) return;
+            isVibrating = true;
+
+            try {
+                if (isIOS && hapticTrigger && hapticInput) {
+                    const patterns = Array.isArray(pattern) ? pattern : [pattern];
+                    for (let i = 0; i < patterns.length; i++) {
+                        if (i % 2 === 0) {
+                            hapticInput.checked = !hapticInput.checked;
+                            hapticTrigger.click();
+                        }
+                        if (patterns.length > 1) {
+                            await new Promise(r => setTimeout(r, patterns[i]));
+                        }
                     }
-                    if (patterns.length > 1) {
-                        await new Promise(r => setTimeout(r, patterns[i]));
-                    }
+                } else if ('vibrate' in navigator) {
+                    navigator.vibrate(pattern);
                 }
-            } else if ('vibrate' in navigator) {
-                navigator.vibrate(pattern);
+            } finally {
+                isVibrating = false;
             }
         };
 
@@ -339,20 +351,25 @@
 
         const startTracking = () => {
             window.addEventListener('deviceorientation', handleOrientation);
+            requestAnimationFrame(updateLoop);
         };
 
         const handleOrientation = (event) => {
             if (isUnlocked) return;
-
-            // alpha is rotation around Z axis (0-360)
             let alpha = event.alpha;
             if (alpha === null) return;
-
             currentAngle = alpha;
-            cylinder.style.transform = `rotate(${currentAngle}deg)`;
+        };
+
+        const updateLoop = () => {
+            if (isUnlocked) return;
+
+            // Apply rotation with translateZ(0) for performance
+            cylinder.style.transform = `rotate(${currentAngle}deg) translateZ(0)`;
             angleText.textContent = `${Math.floor(currentAngle)}°`;
 
             checkHapticFeedback(currentAngle);
+            requestAnimationFrame(updateLoop);
         };
 
         const checkHapticFeedback = (angle) => {
