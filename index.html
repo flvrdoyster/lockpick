@@ -21,6 +21,11 @@
             padding: 0;
             box-sizing: border-box;
             -webkit-tap-highlight-color: transparent;
+            -webkit-touch-callout: none;
+            -webkit-user-select: none;
+            user-select: none;
+            outline: none;
+            cursor: default;
         }
 
         body {
@@ -246,8 +251,8 @@
 
     <!-- Hidden haptic trigger for iOS 17.4+ -->
     <div
-        style="position: fixed; top: 0; left: 0; width: 1px; height: 1px; opacity: 0.01; overflow: hidden; pointer-events: none; z-index: -1;">
-        <input type="checkbox" id="haptic-trigger" switch>
+        style="position: fixed; top: 0; left: 0; width: 0; height: 0; opacity: 0; overflow: hidden; pointer-events: none; z-index: -1;">
+        <input type="checkbox" id="haptic-trigger" switch tabindex="-1">
         <label for="haptic-trigger" id="haptic-label"></label>
     </div>
 
@@ -292,15 +297,22 @@
                 this.noiseNode.buffer = buffer;
                 this.noiseNode.loop = true;
 
+                // Highpass to remove "wind/whoosh" lower frequencies
+                this.hpFilter = ctx.createBiquadFilter();
+                this.hpFilter.type = 'highpass';
+                this.hpFilter.frequency.value = 2000;
+
+                // Resonant peak for metallic "ring"
                 this.filterNode = ctx.createBiquadFilter();
                 this.filterNode.type = 'bandpass';
-                this.filterNode.frequency.value = 1000;
-                this.filterNode.Q.value = 5;
+                this.filterNode.frequency.value = 4000;
+                this.filterNode.Q.value = 15; // Sharper resonance
 
                 this.gainNode = ctx.createGain();
                 this.gainNode.gain.value = 0;
 
-                this.noiseNode.connect(this.filterNode);
+                this.noiseNode.connect(this.hpFilter);
+                this.hpFilter.connect(this.filterNode);
                 this.filterNode.connect(this.gainNode);
                 this.gainNode.connect(ctx.destination);
 
@@ -312,12 +324,21 @@
                 if (!this.started) return;
 
                 // velocity is degree change per frame, proximity is 0 to 1 (1 being closest)
-                const baseGain = Math.min(velocity * 0.05, 0.4);
-                const proximityBoost = proximity > 0.8 ? (proximity - 0.8) * 2 : 0;
+                const baseGain = Math.min(velocity * 0.1, 0.3);
+                const proximityEffect = proximity > 0.5 ? (proximity - 0.5) * 2 : 0;
 
-                this.gainNode.gain.setTargetAtTime(baseGain + proximityBoost * 0.2, audioCtx.currentTime, 0.05);
-                this.filterNode.frequency.setTargetAtTime(800 + (velocity * 20) + (proximity * 1500), audioCtx.currentTime, 0.05);
-                this.filterNode.Q.setTargetAtTime(2 + proximity * 10, audioCtx.currentTime, 0.05);
+                // Add "grit": faster movements jitter the frequency more
+                const jitter = (Math.random() - 0.5) * velocity * 50;
+
+                this.gainNode.gain.setTargetAtTime(baseGain + proximityEffect * 0.1, audioCtx.currentTime, 0.05);
+
+                // Metallic scrape moves from 3kHz to 6kHz based on speed and proximity
+                const targetFreq = 3000 + (velocity * 40) + (proximityEffect * 2000) + jitter;
+                this.filterNode.frequency.setTargetAtTime(targetFreq, audioCtx.currentTime, 0.05);
+
+                // Higher Q near sweet spot for "ringing" metal feel
+                this.filterNode.Q.setTargetAtTime(10 + proximityEffect * 20, audioCtx.currentTime, 0.05);
+                this.hpFilter.frequency.setTargetAtTime(1500 + velocity * 20, audioCtx.currentTime, 0.05);
             }
         };
 
