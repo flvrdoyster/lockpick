@@ -60,6 +60,7 @@
             font-size: 2.5rem;
             margin-bottom: 1rem;
             background: linear-gradient(135deg, #fff 0%, #888 100%);
+            -webkit-background-clip: text;
             -webkit-text-fill-color: transparent;
             font-weight: 700;
         }
@@ -291,51 +292,50 @@
         let currentAngle = 0;
         let lastVibrationTime = 0;
 
-        // Haptic State Machine & Scheduler
+        // Haptic State Machine & Scheduler (Collision-Free)
         const hapticTrigger = document.getElementById('haptic-label');
         const hapticInput = document.getElementById('haptic-trigger');
         const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
 
-        let pendingHaptic = null; // 'TICK', 'SNAP', 'SUCCESS', 'FAIL'
+        let pendingHaptic = null;
         let lastPhysicalHapticTime = 0;
         const HAPTIC_INTERVAL = 60; // Safe interval for iOS (ms)
 
         const triggerHaptic = (type) => {
-            // Priority: SUCCESS/FAIL > SNAP > TICK
             if (pendingHaptic === 'SUCCESS' || pendingHaptic === 'FAIL') return;
             pendingHaptic = type;
         };
 
-        const hapticScheduler = async () => {
+        const performVibration = (type) => {
+            if (isIOS && hapticInput) {
+                // Force state change for haptics
+                hapticInput.click();
+
+                if (type === 'SUCCESS') {
+                    setTimeout(() => { hapticInput.click(); }, 100);
+                    setTimeout(() => { hapticInput.click(); }, 200);
+                } else if (type === 'FAIL') {
+                    setTimeout(() => { hapticInput.click(); }, 80);
+                }
+            } else if ('vibrate' in navigator) {
+                if (type === 'TICK') navigator.vibrate(5);
+                else if (type === 'SNAP') navigator.vibrate(20);
+                else if (type === 'SUCCESS') navigator.vibrate([100, 50, 100]);
+                else if (type === 'FAIL') navigator.vibrate([30, 30, 30]);
+            }
+        };
+
+        const hapticScheduler = () => {
             const now = Date.now();
             if (pendingHaptic && (now - lastPhysicalHapticTime >= HAPTIC_INTERVAL)) {
                 const intent = pendingHaptic;
-                pendingHaptic = null; // Clear intent
+                pendingHaptic = null;
                 lastPhysicalHapticTime = now;
-
-                if (isIOS && hapticTrigger && hapticInput) {
-                    // Physical trigger
-                    hapticInput.checked = !hapticInput.checked;
-                    hapticTrigger.click();
-
-                    // For long patterns, we still need a delay
-                    if (intent === 'SUCCESS') {
-                        setTimeout(() => { hapticTrigger.click(); }, 150);
-                        setTimeout(() => { hapticTrigger.click(); }, 300);
-                    } else if (intent === 'FAIL') {
-                        setTimeout(() => { hapticTrigger.click(); }, 100);
-                    }
-                } else if ('vibrate' in navigator) {
-                    if (intent === 'TICK') navigator.vibrate(5);
-                    else if (intent === 'SNAP') navigator.vibrate(20);
-                    else if (intent === 'SUCCESS') navigator.vibrate(300);
-                    else if (intent === 'FAIL') navigator.vibrate([50, 50, 50]);
-                }
+                performVibration(intent);
             }
             requestAnimationFrame(hapticScheduler);
         };
 
-        // Start scheduler immediately
         hapticScheduler();
 
         const init = async () => {
@@ -362,7 +362,9 @@
 
             overlay.classList.add('hidden');
             isInitialized = true;
-            triggerHaptic('SNAP'); // Initial feedback
+
+            // Trigger first haptic directly on user gesture to bypass browser restrictions
+            performVibration('SNAP');
         };
 
         const startTracking = () => {
