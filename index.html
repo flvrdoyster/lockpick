@@ -291,35 +291,50 @@
         let lastTickAngle = 0;
         let currentAngle = 0;
         let lastVibrationTime = 0;
+        let audioCtx = null;
 
-        // Haptic State Machine & Scheduler (Collision-Free)
-        const hapticTrigger = document.getElementById('haptic-label');
+        // Haptic State Machine & Scheduler (Final Universal)
         const hapticInput = document.getElementById('haptic-trigger');
         const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
 
         let pendingHaptic = null;
         let lastPhysicalHapticTime = 0;
-        const HAPTIC_INTERVAL = 60; // Safe interval for iOS (ms)
+        const HAPTIC_INTERVAL = 100; // Minimal safe interval for iOS (ms)
 
         const triggerHaptic = (type) => {
             if (pendingHaptic === 'SUCCESS' || pendingHaptic === 'FAIL') return;
             pendingHaptic = type;
         };
 
+        const playAudioClick = (freq = 150) => {
+            if (!audioCtx) return;
+            const osc = audioCtx.createOscillator();
+            const gain = audioCtx.createGain();
+            osc.type = 'sine';
+            osc.frequency.setValueAtTime(freq, audioCtx.currentTime);
+            gain.gain.setValueAtTime(0.3, audioCtx.currentTime);
+            gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.05);
+            osc.connect(gain);
+            gain.connect(audioCtx.destination);
+            osc.start();
+            osc.stop(audioCtx.currentTime + 0.05);
+        };
+
         const performVibration = (type) => {
             if (isIOS && hapticInput) {
-                // Force state change for haptics
+                // Audio fallback for iPhone (Syncs with haptic)
+                playAudioClick(type === 'TICK' ? 100 : 200);
+
+                // Physical trigger
                 hapticInput.click();
 
                 if (type === 'SUCCESS') {
-                    setTimeout(() => { hapticInput.click(); }, 100);
-                    setTimeout(() => { hapticInput.click(); }, 200);
-                } else if (type === 'FAIL') {
-                    setTimeout(() => { hapticInput.click(); }, 80);
+                    setTimeout(() => { hapticInput.click(); }, 120);
+                    setTimeout(() => { hapticInput.click(); }, 240);
                 }
             } else if ('vibrate' in navigator) {
                 if (type === 'TICK') navigator.vibrate(5);
-                else if (type === 'SNAP') navigator.vibrate(20);
+                else if (type === 'SNAP') navigator.vibrate(30);
                 else if (type === 'SUCCESS') navigator.vibrate([100, 50, 100]);
                 else if (type === 'FAIL') navigator.vibrate([30, 30, 30]);
             }
@@ -336,9 +351,14 @@
             requestAnimationFrame(hapticScheduler);
         };
 
-        hapticScheduler();
-
         const init = async () => {
+            // Audio Context must start on gesture
+            audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+            if (audioCtx.state === 'suspended') audioCtx.resume();
+
+            // Start haptic scheduler on user gesture
+            hapticScheduler();
+
             // iOS Permission Request
             if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
                 try {
@@ -352,18 +372,13 @@
                     console.error(e);
                 }
             } else {
-                // Non-iOS or old iOS
                 startTracking();
             }
-
-            // Audio Context activation (optional, for haptic feel)
-            const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-            if (audioCtx.state === 'suspended') audioCtx.resume();
 
             overlay.classList.add('hidden');
             isInitialized = true;
 
-            // Trigger first haptic directly on user gesture to bypass browser restrictions
+            // Initial feedback
             performVibration('SNAP');
         };
 
