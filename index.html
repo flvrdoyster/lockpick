@@ -161,26 +161,6 @@
             border-radius: 2px;
         }
 
-        /* Success UI */
-        #success-msg {
-            position: absolute;
-            bottom: -100px;
-            text-align: center;
-            opacity: 0;
-            transform: translateY(20px);
-            transition: all 0.6s cubic-bezier(0.175, 0.885, 0.32, 1.275);
-        }
-
-        #success-msg.show {
-            opacity: 1;
-            transform: translateY(0);
-        }
-
-        .congrats {
-            font-size: 1.5rem;
-            color: var(--accent-color);
-            margin-bottom: 0.5rem;
-        }
 
         /* Status Bar */
         .status-bar {
@@ -240,14 +220,15 @@
         <h1>LOCKPICK</h1>
         <p>
             <strong>스마트폰을 책상 위에 내려놓으세요.</strong><br>
-            스마트폰을 제자리에서 천천히 회전시켜 정답 각도를 찾으십시오.<br>
-            미세한 진동에 집중하세요!
+            화면을 <strong>가볍게 터치한 채로</strong> 폰을 회전시켜 정답 각도를 찾으십시오.<br>
+            손 끝에 전해지는 미세한 진동에 집중하세요!
         </p>
         <button id="start-btn">시작</button>
     </div>
 
     <div class="status-bar">
         <div class="status-item">STATUS: <span id="status-text">LOCKED</span></div>
+        <div class="status-item">STAGE: <span id="stage-text">1/3</span></div>
         <div class="status-item">ANGLE: <span id="angle-text">0°</span></div>
     </div>
 
@@ -260,14 +241,8 @@
         </div>
     </div>
 
-    <div id="success-msg">
-        <div class="congrats">해제 성공!</div>
-        <button id="reset-btn"
-            style="background:none; border: 1px solid #444; color: #888; padding: 5px 15px; border-radius: 20px; margin-top: 10px;">다시
-            시작</button>
-    </div>
 
-    <div class="hint">TAP SCREEN TO UNLOCK WHEN NEAR</div>
+    <div class="hint">TOUCH & HOLD TO FEEL TENSION • TAP TO UNLOCK</div>
 
     <!-- Hidden haptic trigger for iOS 17.4+ -->
     <div
@@ -280,20 +255,71 @@
         const cylinder = document.getElementById('cylinder');
         const angleText = document.getElementById('angle-text');
         const statusText = document.getElementById('status-text');
+        const stageText = document.getElementById('stage-text');
         const overlay = document.getElementById('overlay');
         const startBtn = document.getElementById('start-btn');
         const gameContainer = document.getElementById('game-container');
-        const successMsg = document.getElementById('success-msg');
-        const resetBtn = document.getElementById('reset-btn');
 
         let isInitialized = false;
         let isUnlocked = false;
-        let sweetSpot = Math.floor(Math.random() * 360);
+        let isTouching = false;
+        let stages = [0, 0, 0].map(() => Math.floor(Math.random() * 360));
+        let currentStageIndex = 0;
         let lastTickAngle = 0;
         let currentAngle = 0;
+        let lastAngle = 0;
         let isInSweetSpot = false;
+        let lastHeartbeatTime = 0;
         let lastResolutionAngle = 0;
         let audioCtx = null;
+
+        // Scrape Sound Engine
+        const scrapeSound = {
+            noiseNode: null,
+            filterNode: null,
+            gainNode: null,
+            started: false,
+
+            init(ctx) {
+                const bufferSize = 2 * ctx.sampleRate;
+                const buffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate);
+                const data = buffer.getChannelData(0);
+                for (let i = 0; i < bufferSize; i++) {
+                    data[i] = Math.random() * 2 - 1;
+                }
+
+                this.noiseNode = ctx.createBufferSource();
+                this.noiseNode.buffer = buffer;
+                this.noiseNode.loop = true;
+
+                this.filterNode = ctx.createBiquadFilter();
+                this.filterNode.type = 'bandpass';
+                this.filterNode.frequency.value = 1000;
+                this.filterNode.Q.value = 5;
+
+                this.gainNode = ctx.createGain();
+                this.gainNode.gain.value = 0;
+
+                this.noiseNode.connect(this.filterNode);
+                this.filterNode.connect(this.gainNode);
+                this.gainNode.connect(ctx.destination);
+
+                this.noiseNode.start();
+                this.started = true;
+            },
+
+            update(velocity, proximity) {
+                if (!this.started) return;
+
+                // velocity is degree change per frame, proximity is 0 to 1 (1 being closest)
+                const baseGain = Math.min(velocity * 0.05, 0.4);
+                const proximityBoost = proximity > 0.8 ? (proximity - 0.8) * 2 : 0;
+
+                this.gainNode.gain.setTargetAtTime(baseGain + proximityBoost * 0.2, audioCtx.currentTime, 0.05);
+                this.filterNode.frequency.setTargetAtTime(800 + (velocity * 20) + (proximity * 1500), audioCtx.currentTime, 0.05);
+                this.filterNode.Q.setTargetAtTime(2 + proximity * 10, audioCtx.currentTime, 0.05);
+            }
+        };
 
         // Haptic State Machine & Scheduler (Final Universal)
         const hapticInput = document.getElementById('haptic-trigger');
@@ -323,24 +349,26 @@
         };
 
         const performVibration = (type) => {
-            if (isIOS && hapticInput) {
+            if (isIOS && hapticInput && isTouching) {
                 // Pre-sharpening audio click (sine based)
                 if (type === 'TICK') playAudioClick(150);
                 else if (type === 'SNAP') playAudioClick(250);
                 else if (type === 'SUCCESS') playAudioClick(100);
+                else if (type === 'HEARTBEAT') playAudioClick(80);
 
-                // Physical trigger
-                hapticInput.click();
+                // Physical trigger toggling for iOS Chrome
+                hapticInput.checked = !hapticInput.checked;
 
                 if (type === 'SUCCESS') {
-                    setTimeout(() => { hapticInput.click(); }, 120);
-                    setTimeout(() => { hapticInput.click(); }, 240);
+                    setTimeout(() => { hapticInput.checked = !hapticInput.checked; }, 120);
+                    setTimeout(() => { hapticInput.checked = !hapticInput.checked; }, 240);
                 }
-            } else if ('vibrate' in navigator) {
+            } else if (!isIOS && 'vibrate' in navigator) {
                 if (type === 'TICK') navigator.vibrate(5);
-                else if (type === 'SNAP') navigator.vibrate(30);
+                else if (type === 'SNAP') navigator.vibrate(20);
                 else if (type === 'SUCCESS') navigator.vibrate([100, 50, 100]);
                 else if (type === 'FAIL') navigator.vibrate([30, 30, 30]);
+                else if (type === 'HEARTBEAT') navigator.vibrate(10);
             }
         };
 
@@ -361,6 +389,8 @@
             // Audio Context must start on gesture
             audioCtx = new (window.AudioContext || window.webkitAudioContext)();
             if (audioCtx.state === 'suspended') audioCtx.resume();
+
+            scrapeSound.init(audioCtx);
 
             // Start haptic scheduler on user gesture
             hapticScheduler();
@@ -405,17 +435,35 @@
         const updateLoop = () => {
             if (isUnlocked) return;
 
+            // Calculate velocity for sound
+            const diff = Math.abs(currentAngle - lastAngle);
+            const velocity = Math.min(diff, 360 - diff);
+            lastAngle = currentAngle;
+
             // Apply rotation with translateZ(0) for performance
             cylinder.style.transform = `rotate(${currentAngle}deg) translateZ(0)`;
             angleText.textContent = `${Math.floor(currentAngle)}°`;
 
-            checkHapticFeedback(currentAngle);
+            const proximity = checkHapticFeedback(currentAngle);
+            scrapeSound.update(velocity, proximity);
+
+            // Heartbeat check (when stationary in sweet spot and touching)
+            if (isInSweetSpot && isTouching && velocity < 0.1) {
+                const now = Date.now();
+                if (now - lastHeartbeatTime > 800) {
+                    triggerHaptic('HEARTBEAT');
+                    lastHeartbeatTime = now;
+                }
+            }
+
             requestAnimationFrame(updateLoop);
         };
 
         const checkHapticFeedback = (angle) => {
+            const sweetSpot = stages[currentStageIndex];
             const diff = Math.abs(angle - sweetSpot);
             const normalizedDiff = Math.min(diff, 360 - diff);
+            const proximity = Math.max(0, 1 - (normalizedDiff / 30)); // 0 to 1 within 30 degrees
 
             // 1. Regular Zone (outside 10 degrees)
             if (normalizedDiff > 10) {
@@ -444,16 +492,32 @@
                     isInSweetSpot = true;
                 }
             }
+            return proximity;
         };
 
         const tryUnlock = () => {
             if (!isInitialized || isUnlocked) return;
 
+            const sweetSpot = stages[currentStageIndex];
             const diff = Math.abs(currentAngle - sweetSpot);
             const normalizedDiff = Math.min(diff, 360 - diff);
 
             if (normalizedDiff <= 2) {
-                unlockSuccess();
+                if (currentStageIndex < stages.length - 1) {
+                    // Advance to next stage
+                    currentStageIndex++;
+                    stageText.textContent = `${currentStageIndex + 1}/${stages.length}`;
+                    triggerHaptic('SNAP');
+                    // Flash indicator
+                    cylinder.style.transition = 'background 0.2s';
+                    cylinder.style.background = 'radial-gradient(circle at 30% 30%, #ffd700, #444)';
+                    setTimeout(() => {
+                        cylinder.style.background = '';
+                        cylinder.style.transition = '';
+                    }, 200);
+                } else {
+                    unlockSuccess();
+                }
             } else {
                 // Fail feedback
                 triggerHaptic('FAIL');
@@ -469,14 +533,16 @@
             document.body.classList.add('unlocked');
             statusText.textContent = 'OPEN';
             statusText.style.color = 'var(--accent-color)';
-            successMsg.classList.add('show');
         };
 
         const reset = () => {
+            if (!isInitialized) return;
             const previouslyUnlocked = isUnlocked;
             // Allow manual reset even if not unlocked
             isUnlocked = false;
-            sweetSpot = Math.floor(Math.random() * 360);
+            stages = [0, 0, 0].map(() => Math.floor(Math.random() * 360));
+            currentStageIndex = 0;
+            stageText.textContent = `1/${stages.length}`;
             lastTickAngle = 0;
             lastResolutionAngle = 0;
             isInSweetSpot = false;
@@ -484,7 +550,6 @@
             document.body.classList.remove('unlocked');
             statusText.textContent = 'LOCKED';
             statusText.style.color = '#aaa';
-            successMsg.classList.remove('show');
 
             // Restart the logic loop only if it was stopped
             if (previouslyUnlocked) {
@@ -496,13 +561,32 @@
         };
 
         startBtn.addEventListener('click', init);
-        resetBtn.addEventListener('click', reset);
 
-        // Touchable surface
+        // Touchable surface handlers
         window.addEventListener('pointerdown', (e) => {
-            if (e.target !== startBtn && e.target !== resetBtn) {
+            if (e.target === startBtn) return;
+            isTouching = true;
+
+            if (isUnlocked) {
+                reset();
+            }
+        });
+
+        window.addEventListener('pointerup', (e) => {
+            if (e.target === startBtn) return;
+
+            // Only try unlock on quick tap (not long hold)
+            const wasHolding = false; // We could add a timer here, but for now let's use a simpler logic
+            // If we were touching and released quickly, we try unlock
+            // But actually, the user instruction is "Tap to unlock", so we keep it simple
+            if (!isUnlocked) {
                 tryUnlock();
             }
+            isTouching = false;
+        });
+
+        window.addEventListener('pointercancel', () => {
+            isTouching = false;
         });
 
     </script>
