@@ -60,7 +60,6 @@
             font-size: 2.5rem;
             margin-bottom: 1rem;
             background: linear-gradient(135deg, #fff 0%, #888 100%);
-            -webkit-background-clip: text;
             -webkit-text-fill-color: transparent;
             font-weight: 700;
         }
@@ -238,8 +237,8 @@
     <div id="overlay">
         <h1>LOCKPICK</h1>
         <p>
-            <strong>화면 세로 방향 고정을 켜주세요.</strong><br>
-            스마트폰을 수직으로 세워 들고, 다이얼을 돌리듯 천천히 회전시켜 정답 각도를 찾습니다. <br>
+            <strong>스마트폰을 책상 위에 내려놓으세요.</strong><br>
+            스마트폰을 제자리에서 천천히 회전시켜 정답 각도를 찾으십시오.<br>
             미세한 진동에 집중하세요!
         </p>
         <button id="start-btn">시작</button>
@@ -292,41 +291,52 @@
         let currentAngle = 0;
         let lastVibrationTime = 0;
 
-        // Vibrate helper with iOS fallback and global cooldown
+        // Haptic State Machine & Scheduler
         const hapticTrigger = document.getElementById('haptic-label');
         const hapticInput = document.getElementById('haptic-trigger');
         const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
-        let isVibrating = false;
-        let lastHapticTime = 0;
-        const HAPTIC_COOLDOWN = 60; // ms
 
-        const vibrate = async (pattern) => {
+        let pendingHaptic = null; // 'TICK', 'SNAP', 'SUCCESS', 'FAIL'
+        let lastPhysicalHapticTime = 0;
+        const HAPTIC_INTERVAL = 60; // Safe interval for iOS (ms)
+
+        const triggerHaptic = (type) => {
+            // Priority: SUCCESS/FAIL > SNAP > TICK
+            if (pendingHaptic === 'SUCCESS' || pendingHaptic === 'FAIL') return;
+            pendingHaptic = type;
+        };
+
+        const hapticScheduler = async () => {
             const now = Date.now();
-            if (now - lastHapticTime < HAPTIC_COOLDOWN) return;
-            if (isVibrating) return;
+            if (pendingHaptic && (now - lastPhysicalHapticTime >= HAPTIC_INTERVAL)) {
+                const intent = pendingHaptic;
+                pendingHaptic = null; // Clear intent
+                lastPhysicalHapticTime = now;
 
-            isVibrating = true;
-            lastHapticTime = now;
-
-            try {
                 if (isIOS && hapticTrigger && hapticInput) {
-                    const patterns = Array.isArray(pattern) ? pattern : [pattern];
-                    for (let i = 0; i < patterns.length; i++) {
-                        if (i % 2 === 0) {
-                            hapticInput.checked = !hapticInput.checked;
-                            hapticTrigger.click();
-                        }
-                        if (patterns.length > 1) {
-                            await new Promise(r => setTimeout(r, patterns[i]));
-                        }
+                    // Physical trigger
+                    hapticInput.checked = !hapticInput.checked;
+                    hapticTrigger.click();
+
+                    // For long patterns, we still need a delay
+                    if (intent === 'SUCCESS') {
+                        setTimeout(() => { hapticTrigger.click(); }, 150);
+                        setTimeout(() => { hapticTrigger.click(); }, 300);
+                    } else if (intent === 'FAIL') {
+                        setTimeout(() => { hapticTrigger.click(); }, 100);
                     }
                 } else if ('vibrate' in navigator) {
-                    navigator.vibrate(pattern);
+                    if (intent === 'TICK') navigator.vibrate(5);
+                    else if (intent === 'SNAP') navigator.vibrate(20);
+                    else if (intent === 'SUCCESS') navigator.vibrate(300);
+                    else if (intent === 'FAIL') navigator.vibrate([50, 50, 50]);
                 }
-            } finally {
-                isVibrating = false;
             }
+            requestAnimationFrame(hapticScheduler);
         };
+
+        // Start scheduler immediately
+        hapticScheduler();
 
         const init = async () => {
             // iOS Permission Request
@@ -352,7 +362,7 @@
 
             overlay.classList.add('hidden');
             isInitialized = true;
-            vibrate(50); // Initial feedback
+            triggerHaptic('SNAP'); // Initial feedback
         };
 
         const startTracking = () => {
@@ -382,30 +392,28 @@
             const diff = Math.abs(angle - sweetSpot);
             const normalizedDiff = Math.min(diff, 360 - diff);
 
-            // 1. Regular tick (Every 10 degrees) - Quantized to prevent overlapping
+            // 1. Regular tick (Every 10 degrees)
             const currentTickZone = Math.floor(angle / 10);
             if (currentTickZone !== lastTickAngle) {
-                vibrate(5);
+                triggerHaptic('TICK');
                 lastTickAngle = currentTickZone;
             }
 
-            // 2. Proximity Tension (within 10 degrees)
+            // 2. Proximity Tension
             if (normalizedDiff <= 10 && normalizedDiff > 2) {
                 const now = Date.now();
-                // Increased interval to respect cooldown
-                const interval = 100 + (normalizedDiff * 40);
-
+                const interval = 120 + (normalizedDiff * 40);
                 if (now - lastVibrationTime > interval) {
-                    vibrate(10);
+                    triggerHaptic('TICK');
                     lastVibrationTime = now;
                 }
             }
 
-            // 3. Sweet Spot Snap (within 2 degrees)
+            // 3. Sweet Spot Snap
             if (normalizedDiff <= 2) {
                 const now = Date.now();
-                if (now - lastVibrationTime > 150) {
-                    vibrate([15, 30, 15]); // More distinct snap with longer gap
+                if (now - lastVibrationTime > 200) {
+                    triggerHaptic('SNAP');
                     lastVibrationTime = now;
                 }
             }
@@ -421,16 +429,16 @@
                 unlockSuccess();
             } else {
                 // Fail feedback
-                vibrate([50, 50, 50]);
+                triggerHaptic('FAIL');
                 gameContainer.style.animation = 'none';
-                void gameContainer.offsetWidth; // trigger reflow
+                void gameContainer.offsetWidth;
                 gameContainer.style.animation = 'shake 0.2s linear';
             }
         };
 
         const unlockSuccess = () => {
             isUnlocked = true;
-            vibrate(300); // Heavy success vibration
+            triggerHaptic('SUCCESS');
             document.body.classList.add('unlocked');
             statusText.textContent = 'OPEN';
             statusText.style.color = 'var(--accent-color)';
@@ -444,7 +452,7 @@
             statusText.textContent = 'LOCKED';
             statusText.style.color = '#aaa';
             successMsg.classList.remove('show');
-            vibrate(50);
+            triggerHaptic('SNAP');
         };
 
         startBtn.addEventListener('click', init);
