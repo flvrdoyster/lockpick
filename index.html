@@ -61,6 +61,7 @@
             margin-bottom: 1rem;
             background: linear-gradient(135deg, #fff 0%, #888 100%);
             -webkit-background-clip: text;
+            background-clip: text;
             -webkit-text-fill-color: transparent;
             font-weight: 700;
         }
@@ -290,7 +291,8 @@
         let sweetSpot = Math.floor(Math.random() * 360);
         let lastTickAngle = 0;
         let currentAngle = 0;
-        let lastVibrationTime = 0;
+        let isInSweetSpot = false;
+        let lastResolutionAngle = 0;
         let audioCtx = null;
 
         // Haptic State Machine & Scheduler (Final Universal)
@@ -411,29 +413,31 @@
             const diff = Math.abs(angle - sweetSpot);
             const normalizedDiff = Math.min(diff, 360 - diff);
 
-            // 1. Regular tick (Every 10 degrees)
-            const currentTickZone = Math.floor(angle / 10);
-            if (currentTickZone !== lastTickAngle) {
-                triggerHaptic('TICK');
-                lastTickAngle = currentTickZone;
-            }
-
-            // 2. Proximity Tension
-            if (normalizedDiff <= 10 && normalizedDiff > 2) {
-                const now = Date.now();
-                const interval = 120 + (normalizedDiff * 40);
-                if (now - lastVibrationTime > interval) {
+            // 1. Regular Zone (outside 10 degrees)
+            if (normalizedDiff > 10) {
+                const tickZone = Math.floor(angle / 10);
+                if (tickZone !== lastTickAngle) {
                     triggerHaptic('TICK');
-                    lastVibrationTime = now;
+                    lastTickAngle = tickZone;
+                    isInSweetSpot = false; // Reset zone monitoring
                 }
             }
-
-            // 3. Sweet Spot Snap
-            if (normalizedDiff <= 2) {
-                const now = Date.now();
-                if (now - lastVibrationTime > 200) {
+            // 2. Proximity Tension Zone (within 10 degrees)
+            else if (normalizedDiff > 2) {
+                // Higher resolution ticks for "tension" texture
+                const resZone = Math.floor(angle / 2); // Tick every 2 degrees
+                if (resZone !== lastResolutionAngle) {
+                    triggerHaptic('TICK');
+                    lastResolutionAngle = resZone;
+                    isInSweetSpot = false;
+                }
+            }
+            // 3. Sweet Spot Snap (within 2 degrees)
+            else {
+                // Trigger SNAP once when entering the zone
+                if (!isInSweetSpot) {
                     triggerHaptic('SNAP');
-                    lastVibrationTime = now;
+                    isInSweetSpot = true;
                 }
             }
         };
