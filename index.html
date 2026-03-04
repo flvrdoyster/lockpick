@@ -5,7 +5,7 @@
     <meta charset="UTF-8">
     <meta name="viewport"
         content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>ShadowLock - Interactive Lockpicking</title>
+    <title>Interactive Lockpicking</title>
     <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;700&display=swap" rel="stylesheet">
     <style>
         :root {
@@ -236,13 +236,13 @@
 <body>
 
     <div id="overlay">
-        <h1>SHADOWLOCK</h1>
+        <h1>LOCKPICK</h1>
         <p>
-            <strong>[권장] 화면 세로 방향 고정을 켜주세요.</strong><br>
-            스마트폰을 수직으로 세워 들고, 운전대를 돌리듯 시계/반시계 방향으로 천천히 회전시켜 정답 각도를 찾으세요. <br>
-            미세한 진동에 집중하십시오.
+            <strong>화면 세로 방향 고정을 켜주세요.</strong><br>
+            스마트폰을 수직으로 세워 들고, 다이얼을 돌리듯 천천히 회전시켜 정답 각도를 찾습니다. <br>
+            미세한 진동에 집중하세요!
         </p>
-        <button id="start-btn">잠금 해제 시작</button>
+        <button id="start-btn">시작</button>
     </div>
 
     <div class="status-bar">
@@ -260,7 +260,7 @@
     </div>
 
     <div id="success-msg">
-        <div class="congrats">잠금 해제 성공!</div>
+        <div class="congrats">해제 성공!</div>
         <button id="reset-btn"
             style="background:none; border: 1px solid #444; color: #888; padding: 5px 15px; border-radius: 20px; margin-top: 10px;">다시
             시작</button>
@@ -292,15 +292,21 @@
         let currentAngle = 0;
         let lastVibrationTime = 0;
 
-        // Vibrate helper with iOS fallback and concurrency lock
+        // Vibrate helper with iOS fallback and global cooldown
         const hapticTrigger = document.getElementById('haptic-label');
         const hapticInput = document.getElementById('haptic-trigger');
         const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
         let isVibrating = false;
+        let lastHapticTime = 0;
+        const HAPTIC_COOLDOWN = 60; // ms
 
         const vibrate = async (pattern) => {
+            const now = Date.now();
+            if (now - lastHapticTime < HAPTIC_COOLDOWN) return;
             if (isVibrating) return;
+
             isVibrating = true;
+            lastHapticTime = now;
 
             try {
                 if (isIOS && hapticTrigger && hapticInput) {
@@ -374,21 +380,20 @@
 
         const checkHapticFeedback = (angle) => {
             const diff = Math.abs(angle - sweetSpot);
-            const normalizedDiff = Math.min(diff, 360 - diff); // Account for 360/0 wrap
+            const normalizedDiff = Math.min(diff, 360 - diff);
 
-            // 1. Regular tick (Every 10 degrees)
-            if (Math.abs(angle - lastTickAngle) >= 10) {
+            // 1. Regular tick (Every 10 degrees) - Quantized to prevent overlapping
+            const currentTickZone = Math.floor(angle / 10);
+            if (currentTickZone !== lastTickAngle) {
                 vibrate(5);
-                lastTickAngle = angle;
+                lastTickAngle = currentTickZone;
             }
 
             // 2. Proximity Tension (within 10 degrees)
             if (normalizedDiff <= 10 && normalizedDiff > 2) {
                 const now = Date.now();
-                // Vibration frequency increases as distance decreases
-                // normalizedDiff 10 -> interval ~500ms
-                // normalizedDiff 3 -> interval ~100ms
-                const interval = 50 + (normalizedDiff * 45);
+                // Increased interval to respect cooldown
+                const interval = 100 + (normalizedDiff * 40);
 
                 if (now - lastVibrationTime > interval) {
                     vibrate(10);
@@ -399,8 +404,8 @@
             // 3. Sweet Spot Snap (within 2 degrees)
             if (normalizedDiff <= 2) {
                 const now = Date.now();
-                if (now - lastVibrationTime > 100) {
-                    vibrate([15, 10, 15]); // "Snap" feeling
+                if (now - lastVibrationTime > 150) {
+                    vibrate([15, 30, 15]); // More distinct snap with longer gap
                     lastVibrationTime = now;
                 }
             }
