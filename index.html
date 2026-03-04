@@ -306,24 +306,26 @@
             pendingHaptic = type;
         };
 
-        const playAudioClick = (freq = 150) => {
+        const playAudioClick = (freq = 800) => {
             if (!audioCtx) return;
             const osc = audioCtx.createOscillator();
             const gain = audioCtx.createGain();
-            osc.type = 'sine';
+            osc.type = 'square'; // Sharper, more metallic harmonics
             osc.frequency.setValueAtTime(freq, audioCtx.currentTime);
-            gain.gain.setValueAtTime(0.3, audioCtx.currentTime);
-            gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.05);
+            gain.gain.setValueAtTime(0.08, audioCtx.currentTime); // Lower volume for sharper wave
+            gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.03);
             osc.connect(gain);
             gain.connect(audioCtx.destination);
             osc.start();
-            osc.stop(audioCtx.currentTime + 0.05);
+            osc.stop(audioCtx.currentTime + 0.03);
         };
 
         const performVibration = (type) => {
             if (isIOS && hapticInput) {
-                // Audio fallback for iPhone (Syncs with haptic)
-                playAudioClick(type === 'TICK' ? 100 : 200);
+                // Sharper audio click for "찰칵" feel
+                if (type === 'TICK') playAudioClick(900);
+                else if (type === 'SNAP') playAudioClick(1200);
+                else if (type === 'SUCCESS') playAudioClick(400);
 
                 // Physical trigger
                 hapticInput.click();
@@ -463,12 +465,17 @@
         };
 
         const reset = () => {
+            if (!isUnlocked) return;
             isUnlocked = false;
             sweetSpot = Math.floor(Math.random() * 360);
             document.body.classList.remove('unlocked');
             statusText.textContent = 'LOCKED';
             statusText.style.color = '#aaa';
             successMsg.classList.remove('show');
+
+            // Restart the logic loop
+            requestAnimationFrame(updateLoop);
+
             triggerHaptic('SNAP');
         };
 
